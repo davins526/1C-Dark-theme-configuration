@@ -51,6 +51,13 @@ namespace Dark1C {
                 file.Position=0;return file;
             }catch{file.Dispose();throw;}
         }
-        internal static string Background {get{return Path.Combine(RuntimeDirectory,"background.png");}}
+        internal static string Background {get{
+            lock(gate){
+                byte[] image=Resource("Dark1C.Payload.png");
+                if(image==null)return Path.Combine(Path.GetDirectoryName(typeof(Payload).Assembly.Location),"background.png");
+                string folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Dark1C","images",Hash(image));
+                Directory.CreateDirectory(folder);string path=Path.Combine(folder,"background.png");Extract(path,image);return path;
+            }
+        }}
     }
 }

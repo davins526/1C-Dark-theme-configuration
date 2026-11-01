@@ -38,7 +38,11 @@ namespace Dark1C {
             actions.Controls.AddRange(new Control[]{enable,disable,refresh,preview,elevated});flow.Controls.Add(actions);
             flow.Controls.Add(wallpaper);flow.Controls.Add(darkLabel);flow.Controls.Add(darkness);flow.Controls.Add(status);
             flow.Controls.Add(new Label{Text="OFF возвращает исходные вызовы рисования. DLL остаётся до закрытия 1С.\r\nПервая проверка — на копии базы. Охват интерфейса пока частичный.",AutoSize=true});Controls.Add(flow);
-            refresh.Click+=delegate{RefreshTargets();};preview.Click+=delegate{new MainWindow().Show(this);};
+            refresh.Click+=delegate{RefreshTargets();};preview.Click+=delegate{
+                var sample=new MainWindow(CurrentProfile());
+                sample.FormClosed+=delegate{try{var p=Profile.Load(profilePath);themes.SelectedIndex=p.Theme;wallpaper.Checked=p.Wallpaper;darkness.Value=p.Darkness;}catch(Exception ex){status.Text="Профиль не загружен: "+ex.Message;}};
+                sample.Show(this);
+            };
             elevated.Click+=delegate{if(busy)return;try{Process.Start(new ProcessStartInfo(typeof(LiveWindow).Assembly.Location){UseShellExecute=true,Verb="runas"});Close();}catch(Exception ex){status.Text="Перезапуск отменён или недоступен: "+ex.Message;}};
             targets.SelectedIndexChanged+=delegate{var t=targets.SelectedItem as Target;if(t!=null){enable.Enabled=disable.Enabled=t.Reason==null;status.Text=t.Reason??"Сеанс прошёл проверку. Можно применить тему.";}};
             enable.Click+=async delegate{await Apply(true);};disable.Click+=async delegate{await Apply(false);};
@@ -77,7 +81,8 @@ namespace Dark1C {
             }catch(Exception ex){status.Text=ex.Message;WriteLog(ex.ToString());}
             finally{busy=false;enable.Enabled=disable.Enabled=refresh.Enabled=targets.Enabled=themes.Enabled=wallpaper.Enabled=darkness.Enabled=true;}
         }
-        void SaveProfile(){try{new Profile{Theme=themes.SelectedIndex,Wallpaper=wallpaper.Checked,Darkness=darkness.Value}.Save(profilePath);}catch(Exception ex){WriteLog(ex.ToString());status.Text="Настройки не сохранены: "+ex.Message;}}
+        Profile CurrentProfile(){Profile p;try{p=Profile.Load(profilePath);}catch{p=new Profile();}p.Theme=themes.SelectedIndex;p.Wallpaper=wallpaper.Checked;p.Darkness=darkness.Value;return p;}
+        void SaveProfile(){try{CurrentProfile().Save(profilePath);}catch(Exception ex){WriteLog(ex.ToString());status.Text="Настройки не сохранены: "+ex.Message;}}
         void WriteLog(string message){try{Directory.CreateDirectory(Path.GetDirectoryName(log));File.AppendAllText(log,DateTime.Now.ToString("s")+" "+message+Environment.NewLine,Encoding.UTF8);}catch{}}
         [STAThread]static void Main(){Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);Application.Run(new LiveWindow());}
     }

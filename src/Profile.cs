@@ -9,9 +9,15 @@ namespace Dark1C {
         public int Theme;
         public bool Wallpaper;
         public int Darkness=65;
+        // Preview-only until font metrics are validated against the real editor.
+        public string CodeFont="Consolas";
+        public string UiFont="Segoe UI";
+        public int CodeSize=12;
         internal void Validate() {
             if(Version!=1||Theme<0||Theme>1||Darkness<0||Darkness>100)
                 throw new InvalidDataException("Некорректный профиль оформления.");
+            if(string.IsNullOrWhiteSpace(CodeFont)||CodeFont.Length>64||string.IsNullOrWhiteSpace(UiFont)||UiFont.Length>64||CodeSize<9||CodeSize>24)
+                throw new InvalidDataException("Некорректные параметры шрифта.");
         }
         internal static Profile Load(string path) {
             if(!File.Exists(path))return new Profile();
