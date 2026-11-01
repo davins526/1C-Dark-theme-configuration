@@ -8,11 +8,11 @@ $root = Split-Path $PSScriptRoot -Parent
 $reports = Join-Path $PSScriptRoot 'reports'
 $null = New-Item -ItemType Directory -Force -Path $reports
 . (Join-Path $PSScriptRoot 'DefenderScan.ps1')
-$buildReport = [ordered]@{ schema = 1; commit = $env:GITHUB_SHA; result = 'unverified'; stage = 'defender-preflight'; zigArchiveSha256 = $null; defenderBefore = $null; defenderAfter = $null; scanDirectoryExclusionExitCode = $null }
+$buildReport = [ordered]@{ schema = 1; commit = $env:GITHUB_SHA; result = 'unverified'; stage = 'defender-preflight'; zigArchiveSha256 = $null; defenderBefore = $null; defenderAfter = $null; removedExclusionCounts = $null; scanDirectoryExclusionExitCode = $null }
 try {
     Write-Host 'Preparing Defender protection on the disposable hosted worker.'
     # Strengthen protection only on the disposable GitHub-hosted worker.
-    # Never disable protection, alter exclusions or change tamper protection.
+    # Never disable protection, add exclusions or change tamper protection.
     $buildReport.defenderBefore = Get-MpComputerStatus -ErrorAction Stop |
         Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, AMRunningMode
     $service = Get-Service -Name WinDefend -ErrorAction Stop
@@ -35,6 +35,22 @@ try {
     $buildReport.defenderAfter = Get-MpComputerStatus -ErrorAction Stop |
         Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, AMRunningMode
     $null = Assert-Dark1CDefenderReady
+    $buildReport.stage = 'remove-hosted-exclusions'
+    Write-Host 'Removing preconfigured scan exclusions on this disposable hosted worker only.'
+    $preferences = Get-MpPreference -ErrorAction Stop
+    $excludedPaths = @($preferences.ExclusionPath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $excludedExtensions = @($preferences.ExclusionExtension | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $excludedProcesses = @($preferences.ExclusionProcess | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $buildReport.removedExclusionCounts = [ordered]@{ paths = $excludedPaths.Count; extensions = $excludedExtensions.Count; processes = $excludedProcesses.Count }
+    if ($excludedPaths.Count) { Remove-MpPreference -ExclusionPath $excludedPaths -ErrorAction Stop }
+    if ($excludedExtensions.Count) { Remove-MpPreference -ExclusionExtension $excludedExtensions -ErrorAction Stop }
+    if ($excludedProcesses.Count) { Remove-MpPreference -ExclusionProcess $excludedProcesses -ErrorAction Stop }
+    $preferences = Get-MpPreference -ErrorAction Stop
+    if (@($preferences.ExclusionPath | Where-Object { $_ }).Count -or
+        @($preferences.ExclusionExtension | Where-Object { $_ }).Count -or
+        @($preferences.ExclusionProcess | Where-Object { $_ }).Count) {
+        throw 'Hosted scan exclusions remain; verification cannot continue.'
+    }
     $buildReport.stage = 'scan-location'
     Write-Host 'Checking a dedicated scan directory outside the checkout before building.'
     $scanRoot = Join-Path $env:WINDIR ('Temp\Dark1C-Verification-' + [Guid]::NewGuid().ToString('N'))
