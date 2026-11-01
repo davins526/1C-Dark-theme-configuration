@@ -18,7 +18,20 @@ try {
     $service = Get-Service -Name WinDefend -ErrorAction Stop
     if ($service.Status -ne 'Running') { Start-Service -Name WinDefend -ErrorAction Stop }
     Set-MpPreference -DisableRealtimeMonitoring $false -DisableBehaviorMonitoring $false -ErrorAction Stop
-    Update-MpSignature -ErrorAction Stop
+    $buildReport.stage = 'defender-signatures'
+    # The platform may restart its RPC provider immediately after protection is
+    # enabled. Retry the update briefly; never continue without a successful update.
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            Update-MpSignature -ErrorAction Stop
+            break
+        } catch {
+            if ($attempt -eq 3) { throw }
+            Write-Host "Defender signature update failed during startup; retry $attempt of 2."
+            Start-Sleep -Seconds 5
+        }
+    }
+    $buildReport.stage = 'defender-readiness'
     $buildReport.defenderAfter = Get-MpComputerStatus -ErrorAction Stop |
         Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, AMRunningMode
     $null = Assert-Dark1CDefenderReady
