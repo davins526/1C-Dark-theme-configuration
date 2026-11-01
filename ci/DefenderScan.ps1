@@ -24,7 +24,11 @@ function Get-Dark1CExclusionExitCode {
         throw 'Expected a valid Microsoft-signed Defender command-line tool.'
     }
     & $tool -CheckExclusion -Path $Path *> $null
-    return $LASTEXITCODE
+    $exitCode = $LASTEXITCODE
+    # The documented success value here is 1; do not leak it to the job shell's
+    # final native-exit check. The caller validates it and throws on any other value.
+    $global:LASTEXITCODE = 0
+    return $exitCode
 }
 
 function Assert-Dark1CPathScanned {

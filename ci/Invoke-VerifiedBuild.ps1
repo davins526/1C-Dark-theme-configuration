@@ -1,16 +1,24 @@
 # Run only on a fresh GitHub-hosted Windows worker. Never executes produced code.
 $ErrorActionPreference = 'Stop'
-if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') {
+if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
     throw 'This entry point is for the GitHub Windows verification worker only.'
 }
 $root = Split-Path $PSScriptRoot -Parent
 $reports = Join-Path $PSScriptRoot 'reports'
 $null = New-Item -ItemType Directory -Force -Path $reports
 . (Join-Path $PSScriptRoot 'DefenderScan.ps1')
-$buildReport = [ordered]@{ schema = 1; commit = $env:GITHUB_SHA; result = 'unverified'; stage = 'defender-preflight'; zigArchiveSha256 = $null }
+$buildReport = [ordered]@{ schema = 1; commit = $env:GITHUB_SHA; result = 'unverified'; stage = 'defender-preflight'; zigArchiveSha256 = $null; defenderBefore = $null; defenderAfter = $null }
 try {
-    # Do not enable/disable protection or change any exclusions on this worker.
+    # Strengthen protection only on the disposable GitHub-hosted worker.
+    # Never disable protection, alter exclusions or change tamper protection.
+    $buildReport.defenderBefore = Get-MpComputerStatus -ErrorAction Stop |
+        Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, AMRunningMode
+    $service = Get-Service -Name WinDefend -ErrorAction Stop
+    if ($service.Status -ne 'Running') { Start-Service -Name WinDefend -ErrorAction Stop }
+    Set-MpPreference -DisableRealtimeMonitoring $false -DisableBehaviorMonitoring $false -ErrorAction Stop
     Update-MpSignature -ErrorAction Stop
+    $buildReport.defenderAfter = Get-MpComputerStatus -ErrorAction Stop |
+        Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, AMRunningMode
     $null = Assert-Dark1CDefenderReady
     $buildReport.stage = 'compiler-signature'
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
