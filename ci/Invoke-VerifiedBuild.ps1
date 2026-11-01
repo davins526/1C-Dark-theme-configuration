@@ -8,7 +8,7 @@ $root = Split-Path $PSScriptRoot -Parent
 $reports = Join-Path $PSScriptRoot 'reports'
 $null = New-Item -ItemType Directory -Force -Path $reports
 . (Join-Path $PSScriptRoot 'DefenderScan.ps1')
-$buildReport = [ordered]@{ schema = 1; commit = $env:GITHUB_SHA; result = 'unverified'; stage = 'defender-preflight'; zigArchiveSha256 = $null; defenderBefore = $null; defenderAfter = $null }
+$buildReport = [ordered]@{ schema = 1; commit = $env:GITHUB_SHA; result = 'unverified'; stage = 'defender-preflight'; zigArchiveSha256 = $null; defenderBefore = $null; defenderAfter = $null; scanDirectoryExclusionExitCode = $null }
 try {
     Write-Host 'Preparing Defender protection on the disposable hosted worker.'
     # Strengthen protection only on the disposable GitHub-hosted worker.
@@ -35,6 +35,14 @@ try {
     $buildReport.defenderAfter = Get-MpComputerStatus -ErrorAction Stop |
         Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, AMRunningMode
     $null = Assert-Dark1CDefenderReady
+    $buildReport.stage = 'scan-location'
+    Write-Host 'Checking a dedicated scan directory outside the checkout before building.'
+    $scanRoot = Join-Path $env:WINDIR ('Temp\Dark1C-Verification-' + [Guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Path $scanRoot
+    $buildReport.scanDirectoryExclusionExitCode = Get-Dark1CExclusionExitCode -Path $scanRoot
+    if ($buildReport.scanDirectoryExclusionExitCode -ne 1) {
+        throw "Scan directory exclusion check failed: exit $($buildReport.scanDirectoryExclusionExitCode)."
+    }
     $buildReport.stage = 'compiler-signature'
     Write-Host 'Verifying the framework compiler signature.'
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -62,8 +70,16 @@ try {
     & (Join-Path $root 'build-live.ps1') -Zig $zig
     $buildReport.stage = 'defender-scan'
     Write-Host 'Scanning the produced DLL and both executables with Defender.'
-    $paths = @('Dark1C.Native.dll', 'Dark1C.exe', 'Dark1C.Control.exe') | ForEach-Object { Join-Path $root $_ }
-    $scan = Invoke-Dark1CDefenderScan -ArtifactPaths $paths
+    $sourcePaths = @('Dark1C.Native.dll', 'Dark1C.exe', 'Dark1C.Control.exe') | ForEach-Object { Join-Path $root $_ }
+    $paths = @($sourcePaths | ForEach-Object {
+        $destination = Join-Path $scanRoot ([IO.Path]::GetFileName($_))
+        Copy-Item -LiteralPath $_ -Destination $destination
+        if ((Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash) {
+            throw 'Scan copy checksum mismatch.'
+        }
+        $destination
+    })
+    $scan = Invoke-Dark1CDefenderScan -ArtifactPaths $paths -AdditionalDetectionPaths $sourcePaths
     $scan | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $reports 'defender.json') -Encoding UTF8
     if ($scan.result -ne 'no-detection-in-this-scan') { throw "Verification failed at $($scan.stage)." }
     $buildReport.result = 'build-and-scan-completed'

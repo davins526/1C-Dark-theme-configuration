@@ -34,17 +34,17 @@ function Get-Dark1CExclusionExitCode {
 function Assert-Dark1CPathScanned {
     param([string]$Path)
     # Microsoft documents 0 = excluded, 1 = not excluded; other values are errors.
-    if ((Get-Dark1CExclusionExitCode -Path $Path) -ne 1) {
-        throw 'File is excluded from scanning, or exclusion status could not be verified.'
-    }
+    $exitCode = Get-Dark1CExclusionExitCode -Path $Path
+    if ($exitCode -eq 0) { throw 'artifact-excluded' }
+    if ($exitCode -ne 1) { throw 'exclusion-tool-error' }
 }
 
 function Invoke-Dark1CDefenderScan {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string[]]$ArtifactPaths)
+    param([Parameter(Mandatory)][string[]]$ArtifactPaths, [string[]]$AdditionalDetectionPaths = @())
     $ErrorActionPreference = 'Stop'
     $report = [ordered]@{
-        schema = 1; result = 'unverified'; stage = 'preflight'
+        schema = 1; result = 'unverified'; stage = 'preflight'; reason = $null
         startedUtc = [DateTime]::UtcNow.ToString('o'); finishedUtc = $null
         engine = $null; signatures = $null; signatureUpdatedUtc = $null
         files = @(); detections = @(); exclusionsChecked = $false
@@ -58,6 +58,7 @@ function Invoke-Dark1CDefenderScan {
         $report.stage = 'hash-before-scan'
         if ($ArtifactPaths.Count -eq 0) { throw 'No artifacts supplied.' }
         $paths = @($ArtifactPaths | ForEach-Object { (Resolve-Path -LiteralPath $_).ProviderPath })
+        $detectionPaths = @($paths) + @($AdditionalDetectionPaths | ForEach-Object { [IO.Path]::GetFullPath($_) })
         $report.stage = 'exclusion-check'
         foreach ($path in $paths) { Assert-Dark1CPathScanned -Path $path }
         $report.exclusionsChecked = $true
@@ -75,7 +76,7 @@ function Invoke-Dark1CDefenderScan {
         $detections = @(Get-MpThreatDetection -ErrorAction Stop | Where-Object {
             $resources = @($_.Resources) -join "`n"
             $matchesArtifact = $false
-            foreach ($path in $paths) {
+            foreach ($path in $detectionPaths) {
                 if ($resources.IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $matchesArtifact = $true }
             }
             $matchesArtifact
@@ -98,6 +99,11 @@ function Invoke-Dark1CDefenderScan {
         # Deliberately omit exception text and raw detection resources from public reports.
         # The stage identifies the failed check without publishing user/process paths.
         if ($report.result -ne 'detected') { $report.result = 'unverified' }
+        $report.reason = switch ($_.Exception.Message) {
+            'artifact-excluded' { 'artifact-excluded' }
+            'exclusion-tool-error' { 'exclusion-tool-error' }
+            default { 'check-failed' }
+        }
     }
     $report.finishedUtc = [DateTime]::UtcNow.ToString('o')
     return [pscustomobject]$report
