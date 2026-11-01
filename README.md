@@ -1,0 +1,1 @@
+# 1C-Dark-theme-configuration
