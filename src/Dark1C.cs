@@ -29,6 +29,7 @@ namespace Dark1C {
         public ModulePreview(string image) {
             DoubleBuffered = true; BackColor = Color.FromArgb(30,30,30);
             Font = new Font("Consolas", 12); TabStop = true;
+            if(!File.Exists(image))image=Payload.Background;
             if (File.Exists(image)) {
                 using (Image original = Image.FromFile(image)) {
                     wallpaper = new Bitmap(1600,1600);

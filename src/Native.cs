@@ -23,6 +23,7 @@ namespace Dark1C {
         [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr MapViewOfFile(IntPtr mapping,uint access,uint hi,uint lo,UIntPtr bytes);
         [DllImport("kernel32.dll")] static extern bool UnmapViewOfFile(IntPtr address);
         [DllImport("kernel32.dll",SetLastError=true)] static extern bool IsWow64Process(IntPtr process,out bool wow);
+        [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool QueryFullProcessImageName(IntPtr process,uint flags,StringBuilder path,ref int size);
         delegate bool WindowCallback(IntPtr hwnd,IntPtr arg);
         [DllImport("user32.dll")] static extern bool EnumWindows(WindowCallback callback,IntPtr arg);
         [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent,WindowCallback callback,IntPtr arg);
@@ -31,19 +32,28 @@ namespace Dark1C {
         [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd,StringBuilder value,int count);
         [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd,StringBuilder value,int count);
         internal const string DllName="Dark1C.Native.dll";
-        internal static string Root { get { return Path.GetDirectoryName(typeof(Native).Assembly.Location); } }
-        internal static string ProcessPath(Process p) { return p.MainModule.FileName; }
+        internal static string Root { get { return Payload.RuntimeDirectory; } }
+        const string AccessMessage="Нет доступа к сведениям о 1С. Если Конфигуратор запущен от администратора, запусти Dark1C с теми же правами (кнопка «От администратора»).";
+        internal static string ProcessPath(Process p) {
+            IntPtr handle=OpenProcess(0x1000,false,p.Id);
+            if(handle==IntPtr.Zero)throw new InvalidOperationException(AccessMessage);
+            try {var path=new StringBuilder(32768);int n=path.Capacity;if(!QueryFullProcessImageName(handle,0,path,ref n))throw new InvalidOperationException(AccessMessage);return path.ToString();}
+            finally{CloseHandle(handle);}
+        }
         internal static void Validate(Process p) {
             string path=ProcessPath(p);
             if(!Path.GetFileName(path).Equals("1cv8.exe",StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("Подключение разрешено только к 1cv8.exe (Конфигуратор).");
             string v=FileVersionInfo.GetVersionInfo(path).FileVersion;
             if(v!="8.5.1.1529")throw new InvalidOperationException("Эта сборка рассчитана на 8.5.1.1529. Найдена: "+v);
-            bool wow;
-            if(!IsWow64Process(p.Handle,out wow)||wow)throw new InvalidOperationException("Нужен процесс x64.");
+            bool wow;IntPtr limited=OpenProcess(0x1000,false,p.Id);
+            if(limited==IntPtr.Zero)throw new InvalidOperationException(AccessMessage);
+            try {if(!IsWow64Process(limited,out wow))throw new InvalidOperationException(AccessMessage);if(wow)throw new InvalidOperationException("Нужен процесс x64.");}
+            finally{CloseHandle(limited);}
             using(var query=new System.Management.ManagementObjectSearcher("SELECT CommandLine FROM Win32_Process WHERE ProcessId="+p.Id)) {
                 bool designer=false;
                 foreach(System.Management.ManagementObject item in query.Get()) {
                     string command=Convert.ToString(item["CommandLine"]);
+                    if(string.IsNullOrWhiteSpace(command))throw new InvalidOperationException(AccessMessage);
                     designer=System.Text.RegularExpressions.Regex.IsMatch(command,@"(?:^|\s)DESIGNER(?:\s|$)",System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                 }
                 if(!designer)throw new InvalidOperationException("Не удалось подтвердить режим DESIGNER. Открой Конфигуратор отдельно и обнови список.");
@@ -75,7 +85,7 @@ namespace Dark1C {
         // an owned disposable host; the UI always enters through Validate().
         static void InjectCore(Process p) {
             string dll=Path.Combine(Root,DllName);
-            if(!File.Exists(dll))throw new FileNotFoundException("Нет нативного модуля",dll);
+            if(!File.Exists(dll))throw new FileNotFoundException("Нет нативного модуля: "+dll+". Используй полную сборку Dark1C.exe со встроенной DLL.",dll);
             foreach(ProcessModule m in p.Modules) {
                 if(m.ModuleName.Equals(DllName,StringComparison.OrdinalIgnoreCase)) {
                     if(!Path.GetFullPath(m.FileName).Equals(Path.GetFullPath(dll),StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("В процессе загружена другая копия Dark1C. Перезапусти этот Конфигуратор.");
