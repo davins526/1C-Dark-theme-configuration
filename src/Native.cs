@@ -86,33 +86,37 @@ namespace Dark1C {
         static void InjectCore(Process p) {
             string dll=Path.Combine(Root,DllName);
             if(!File.Exists(dll))throw new FileNotFoundException("Нет нативного модуля: "+dll+". Используй полную сборку Dark1C.exe со встроенной DLL.",dll);
-            foreach(ProcessModule m in p.Modules) {
-                if(m.ModuleName.Equals(DllName,StringComparison.OrdinalIgnoreCase)) {
-                    if(!Path.GetFullPath(m.FileName).Equals(Path.GetFullPath(dll),StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("В процессе загружена другая копия Dark1C. Перезапусти этот Конфигуратор.");
-                    return;
+            using(var verifiedDll=Payload.OpenVerifiedDll(dll)) {
+                foreach(ProcessModule m in p.Modules) {
+                    if(m.ModuleName.Equals(DllName,StringComparison.OrdinalIgnoreCase)) {
+                        if(!Path.GetFullPath(m.FileName).Equals(Path.GetFullPath(dll),StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("В процессе загружена другая копия Dark1C. Перезапусти этот Конфигуратор.");
+                        return;
+                    }
                 }
-            }
-            IntPtr local=GetProcAddress(GetModuleHandle("kernel32.dll"),"LoadLibraryW"),owner;
-            if(local==IntPtr.Zero||!GetModuleHandleEx(6,local,out owner))throw new Win32Exception();
-            var ownerPath=new StringBuilder(1024);GetModuleFileName(owner,ownerPath,ownerPath.Capacity);
-            string ownerName=Path.GetFileName(ownerPath.ToString());IntPtr remoteOwner=IntPtr.Zero;
-            foreach(ProcessModule m in p.Modules)if(m.ModuleName.Equals(ownerName,StringComparison.OrdinalIgnoreCase))remoteOwner=m.BaseAddress;
-            if(remoteOwner==IntPtr.Zero)throw new InvalidOperationException("Не найден системный модуль загрузчика.");
-            IntPtr entry=new IntPtr(remoteOwner.ToInt64()+local.ToInt64()-owner.ToInt64());
-            IntPtr process=OpenProcess(0x43a,false,p.Id);
-            if(process==IntPtr.Zero)throw new Win32Exception(Marshal.GetLastWin32Error(),"Нет доступа к процессу. Проверь, что 1С и Dark1C запущены с одинаковыми правами.");
-            IntPtr remote=IntPtr.Zero,thread=IntPtr.Zero;bool finished=true;
-            try {
-                byte[] bytes=Encoding.Unicode.GetBytes(dll+"\0");
-                remote=VirtualAllocEx(process,IntPtr.Zero,(UIntPtr)bytes.Length,0x3000,4);if(remote==IntPtr.Zero)throw new Win32Exception();
-                UIntPtr written;if(!WriteProcessMemory(process,remote,bytes,(UIntPtr)bytes.Length,out written)||written.ToUInt64()!=(ulong)bytes.Length)throw new Win32Exception();
-                thread=CreateRemoteThread(process,IntPtr.Zero,UIntPtr.Zero,entry,remote,0,IntPtr.Zero);if(thread==IntPtr.Zero)throw new Win32Exception();
-                finished=WaitForSingleObject(thread,15000)==0;
-                if(!finished)throw new TimeoutException("Загрузчик DLL не завершился за 15 секунд. Буфер оставлен до завершения процесса. Не повторяй подключение; перезапусти тестовый Конфигуратор.");
-            }finally{
-                if(thread!=IntPtr.Zero)CloseHandle(thread);
-                if(remote!=IntPtr.Zero&&finished)VirtualFreeEx(process,remote,UIntPtr.Zero,0x8000);
-                CloseHandle(process);
+                IntPtr local=GetProcAddress(GetModuleHandle("kernel32.dll"),"LoadLibraryW"),owner;
+                if(local==IntPtr.Zero||!GetModuleHandleEx(6,local,out owner))throw new Win32Exception();
+                var ownerPath=new StringBuilder(1024);GetModuleFileName(owner,ownerPath,ownerPath.Capacity);
+                string ownerName=Path.GetFileName(ownerPath.ToString());IntPtr remoteOwner=IntPtr.Zero;
+                foreach(ProcessModule m in p.Modules)if(m.ModuleName.Equals(ownerName,StringComparison.OrdinalIgnoreCase))remoteOwner=m.BaseAddress;
+                if(remoteOwner==IntPtr.Zero)throw new InvalidOperationException("Не найден системный модуль загрузчика.");
+                IntPtr entry=new IntPtr(remoteOwner.ToInt64()+local.ToInt64()-owner.ToInt64());
+                // Create thread, query information, VM operation and VM write.
+                // Reading target memory is unnecessary for passing the DLL path.
+                IntPtr process=OpenProcess(0x42a,false,p.Id);
+                if(process==IntPtr.Zero)throw new Win32Exception(Marshal.GetLastWin32Error(),"Нет доступа к процессу. Проверь, что 1С и Dark1C запущены с одинаковыми правами.");
+                IntPtr remote=IntPtr.Zero,thread=IntPtr.Zero;bool finished=true;
+                try {
+                    byte[] bytes=Encoding.Unicode.GetBytes(dll+"\0");
+                    remote=VirtualAllocEx(process,IntPtr.Zero,(UIntPtr)bytes.Length,0x3000,4);if(remote==IntPtr.Zero)throw new Win32Exception();
+                    UIntPtr written;if(!WriteProcessMemory(process,remote,bytes,(UIntPtr)bytes.Length,out written)||written.ToUInt64()!=(ulong)bytes.Length)throw new Win32Exception();
+                    thread=CreateRemoteThread(process,IntPtr.Zero,UIntPtr.Zero,entry,remote,0,IntPtr.Zero);if(thread==IntPtr.Zero)throw new Win32Exception();
+                    finished=WaitForSingleObject(thread,15000)==0;
+                    if(!finished)throw new TimeoutException("Загрузчик DLL не завершился за 15 секунд. Буфер оставлен до завершения процесса. Не повторяй подключение; перезапусти тестовый Конфигуратор.");
+                }finally{
+                    if(thread!=IntPtr.Zero)CloseHandle(thread);
+                    if(remote!=IntPtr.Zero&&finished)VirtualFreeEx(process,remote,UIntPtr.Zero,0x8000);
+                    CloseHandle(process);
+                }
             }
         }
         internal static void Apply(Process p,bool on,bool wallpaper,int darkness,int theme=0) {
