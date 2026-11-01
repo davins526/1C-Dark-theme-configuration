@@ -12,6 +12,8 @@ on:
       - 'vendor/**'
       - 'build-live.ps1'
       - 'create-background.ps1'
+      - 'docs/BUILD-CANDIDATE.md'
+      - 'LICENSE.txt'
 
 permissions:
   contents: read
@@ -31,7 +33,16 @@ jobs:
         run: ./ci/Test-DefenderScan.ps1
       - name: Build from source and scan without executing the application
         run: ./ci/Invoke-VerifiedBuild.ps1
-      - name: Preserve reports only (no application binaries)
+      - name: Package the candidate after successful verification
+        run: ./ci/Package-Candidate.ps1
+      - name: Upload the verified experimental candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Dark1C-experimental-windows-x64
+          path: ci/package/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve verification reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
