@@ -4,9 +4,36 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Drawing;
 
 namespace Dark1C {
     static class SmokeTest {
+        [StructLayout(LayoutKind.Sequential)]struct Rect {public int L,T,R,B;public Rect(int l,int t,int r,int b){L=l;T=t;R=r;B=b;}}
+        [DllImport("user32.dll")]static extern bool DrawEdge(IntPtr dc,ref Rect r,uint edge,uint flags);
+        [DllImport("user32.dll")]static extern bool DrawFrameControl(IntPtr dc,ref Rect r,uint type,uint state);
+        [DllImport("uxtheme.dll",CharSet=CharSet.Unicode)]static extern IntPtr OpenThemeData(IntPtr window,string classes);
+        [DllImport("uxtheme.dll")]static extern int CloseThemeData(IntPtr h);
+        [DllImport("uxtheme.dll")]static extern int DrawThemeBackground(IntPtr h,IntPtr dc,int part,int state,ref Rect r,IntPtr clip);
+        static string PaintChrome(string png) {
+            using(var bitmap=new Bitmap(200,120)){
+                using(var g=Graphics.FromImage(bitmap)){
+                    g.Clear(Color.White);IntPtr dc=g.GetHdc();
+                    try {
+                        var edge=new Rect(0,0,100,20);DrawEdge(dc,ref edge,5,15);
+                        var arrow=new Rect(0,70,20,90);DrawFrameControl(dc,ref arrow,3,2);
+                        IntPtr theme=OpenThemeData(IntPtr.Zero,"SCROLLBAR");
+                        if(theme==IntPtr.Zero)throw new Exception("Scrollbar theme unavailable in test host");
+                        try {var track=new Rect(0,30,180,55);DrawThemeBackground(theme,dc,4,1,ref track,IntPtr.Zero);
+                            var thumb=new Rect(20,30,100,55);DrawThemeBackground(theme,dc,2,1,ref thumb,IntPtr.Zero);
+                        }finally{CloseThemeData(theme);}
+                    }finally{g.ReleaseHdc(dc);}
+                }
+                bitmap.Save(png);
+                return (bitmap.GetPixel(10,0).ToArgb()&0xffffff).ToString("X6")+" "+
+                    (bitmap.GetPixel(150,40).ToArgb()&0xffffff).ToString("X6")+" "+
+                    (bitmap.GetPixel(50,40).ToArgb()&0xffffff).ToString("X6");
+            }
+        }
         [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern IntPtr LoadLibraryEx(string path,IntPtr reserved,uint flags);
         [DllImport("kernel32.dll",CharSet=CharSet.Ansi)]static extern IntPtr GetProcAddress(IntPtr module,string name);
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]delegate IntPtr Image(int format,int w,int h);
@@ -38,10 +65,13 @@ namespace Dark1C {
         static int Main(string[] args) {
             try {
                 if(args.Length==3&&args[0]=="--host") {
+                    System.Windows.Forms.Application.EnableVisualStyles();
                     string dir=args[1];IntPtr cairo=LoadLibraryEx(args[2],IntPtr.Zero,0x1100);if(cairo==IntPtr.Zero)throw new System.ComponentModel.Win32Exception();
+                    File.WriteAllText(Path.Combine(dir,"chrome0.txt"),PaintChrome(Path.Combine(dir,"chrome0.png")));
                     File.WriteAllText(Path.Combine(dir,"baseline.txt"),Paint(cairo,Path.Combine(dir,"baseline.png")));
                     for(int stage=1;stage<=7;stage++) {
                         int current=stage;Wait(delegate{return File.Exists(Path.Combine(dir,"stage"+current));},"stage");
+                        File.WriteAllText(Path.Combine(dir,"chrome"+stage+".txt"),PaintChrome(Path.Combine(dir,"chrome"+stage+".png")));
                         File.WriteAllText(Path.Combine(dir,"result"+stage+".txt"),Paint(cairo,Path.Combine(dir,"stage"+stage+".png")));
                     }
                     return 0;
@@ -69,6 +99,10 @@ namespace Dark1C {
                             if(stage==4&&!result.StartsWith("FAFAFA 202020"))throw new Exception("Light palette mismatch");
                             if(stage==6&&result.Split(' ')[0]=="FAFAFA")throw new Exception("Light wallpaper did not render");
                             if(result.Split(' ')[2]!=baseline.Split(' ')[2])throw new Exception("Accent changed");
+                            string chrome=File.ReadAllText(Path.Combine(output,"chrome"+stage+".txt"));
+                            if(on&&theme==0&&chrome!="444444 252525 585858")throw new Exception("Dark border/scrollbar mismatch: "+chrome);
+                            if((!on||theme==1)&&chrome!=File.ReadAllText(Path.Combine(output,"chrome0.txt")))throw new Exception("OFF/light changed native chrome");
+                            Console.WriteLine("Chrome "+stage+": "+chrome);
                         }
                         if(!host.WaitForExit(5000)||host.ExitCode!=0)throw new Exception("Host exit failed");
                         Console.WriteLine("PASS: injection, dark/light palettes, wallpaper in both themes, accents, repeated switching, OFF, clean exit.");

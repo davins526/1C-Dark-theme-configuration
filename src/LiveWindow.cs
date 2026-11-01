@@ -24,7 +24,7 @@ namespace Dark1C {
         string profileError;
         bool busy;
         public LiveWindow() {
-            Text="Dark1C 0.2.1 · 1С 8.5.1.1529 x64 · предварительная версия";
+            Text="Dark1C 0.2.2 · 1С 8.5.1.1529 x64 · предварительная версия";
             ClientSize=new Size(790,510);MinimumSize=new Size(800,550);
             StartPosition=FormStartPosition.CenterScreen;BackColor=Color.FromArgb(30,30,30);ForeColor=Color.Gainsboro;Font=new Font("Segoe UI",10);
             var flow=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(20),AutoScroll=true};
@@ -48,7 +48,7 @@ namespace Dark1C {
             FormClosing+=delegate(object sender,FormClosingEventArgs e){if(busy){e.Cancel=true;return;}SaveProfile();};
             Shown+=delegate{RefreshTargets();if(profileError!=null)status.Text=profileError;};
         }
-        Button Button(string label){return new Button{Text=label,AutoSize=true,Height=34,FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(48,48,48),ForeColor=ForeColor,Margin=new Padding(0,0,10,0)};}
+        Button Button(string label){return new RoundedButton{Text=label,AutoSize=true,MinimumSize=new Size(90,36),Height=36,Padding=new Padding(8,2,8,2),BackColor=Color.FromArgb(48,48,48),ForeColor=ForeColor,Margin=new Padding(0,0,10,0)};}
         void RefreshTargets() {
             var old=targets.SelectedItem as Target;targets.Items.Clear();int rejected=0;
             foreach(Process p in Process.GetProcessesByName("1cv8"))using(p){

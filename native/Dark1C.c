@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <math.h>
 #include <wchar.h>
+#include <uxtheme.h>
+#include <vssym32.h>
 #include "MinHook.h"
 
 /* Own implementation. The DLL remains resident until 1C exits: OFF is a
@@ -48,6 +50,106 @@ static int (__cdecl *imageWidth)(cairo_surface_t*);
 static int (__cdecl *imageHeight)(cairo_surface_t*);
 static BOOL (WINAPI *textOut)(HDC,int,int,UINT,const RECT*,LPCWSTR,UINT,const INT*);
 static int (WINAPI *fillRect)(HDC,const RECT*,HBRUSH);
+static BOOL (WINAPI *drawEdge)(HDC,LPRECT,UINT,UINT);
+static BOOL (WINAPI *drawFrame)(HDC,LPRECT,UINT,UINT);
+static int (WINAPI *frameRect)(HDC,const RECT*,HBRUSH);
+static HTHEME (WINAPI *openTheme)(HWND,LPCWSTR);
+static HRESULT (WINAPI *closeTheme)(HTHEME);
+static HRESULT (WINAPI *themeBackground)(HTHEME,HDC,int,int,const RECT*,const RECT*);
+static SRWLOCK themeLock=SRWLOCK_INIT;
+static HTHEME scrollThemes[128];
+static void rememberTheme(HTHEME h) {
+    if(!h)return;AcquireSRWLockExclusive(&themeLock);
+    for(int i=0;i<128;i++)if(scrollThemes[i]==h){ReleaseSRWLockExclusive(&themeLock);return;}
+    for(int i=0;i<128;i++)if(!scrollThemes[i]){scrollThemes[i]=h;break;}
+    ReleaseSRWLockExclusive(&themeLock);
+}
+static int isScrollTheme(HTHEME h) {
+    int found=0;AcquireSRWLockShared(&themeLock);
+    for(int i=0;i<128;i++)if(scrollThemes[i]==h){found=1;break;}
+    ReleaseSRWLockShared(&themeLock);return found;
+}
+static void paintRect(HDC dc,const RECT*r,COLORREF color) {
+    HBRUSH brush=CreateSolidBrush(color);fillRect(dc,r,brush);DeleteObject(brush);
+}
+static int darkMode(void){return InterlockedCompareExchange(&enabled,0,0)==1;}
+static int screenDC(HDC dc){return GetDeviceCaps(dc,TECHNOLOGY)==DT_RASDISPLAY;}
+static void scrollArrow(HDC dc,const RECT*r,int direction,int disabled) {
+    int saved=SaveDC(dc);if(!saved)return;
+    int x=(r->left+r->right)/2,y=(r->top+r->bottom)/2;
+    int size=(r->right-r->left<r->bottom-r->top?r->right-r->left:r->bottom-r->top)/5;if(size<2)size=2;
+    POINT p[3];
+    if(direction==0){p[0]=(POINT){x-size,y+size/2};p[1]=(POINT){x,y-size/2};p[2]=(POINT){x+size,y+size/2};}
+    else if(direction==1){p[0]=(POINT){x-size,y-size/2};p[1]=(POINT){x,y+size/2};p[2]=(POINT){x+size,y-size/2};}
+    else if(direction==2){p[0]=(POINT){x+size/2,y-size};p[1]=(POINT){x-size/2,y};p[2]=(POINT){x+size/2,y+size};}
+    else{p[0]=(POINT){x-size/2,y-size};p[1]=(POINT){x+size/2,y};p[2]=(POINT){x-size/2,y+size};}
+    HPEN pen=CreatePen(PS_SOLID,1,disabled?RGB(95,95,95):RGB(190,190,190));SelectObject(dc,pen);Polyline(dc,p,3);
+    RestoreDC(dc,saved);DeleteObject(pen);
+}
+static BOOL WINAPI h_drawEdge(HDC dc,LPRECT r,UINT edge,UINT flags) {
+    if(!darkMode()||!screenDC(dc)||!r||flags&BF_DIAGONAL)return drawEdge(dc,r,edge,flags);
+    RECT original=*r;
+    /* Preserve Win32 rectangle adjustment/return semantics, then cover only the
+       requested edge strips. Backgrounds and hit rectangles are unchanged. */
+    int saved=SaveDC(dc);if(!saved)return drawEdge(dc,r,edge,flags);
+    BOOL result=drawEdge(dc,r,edge,flags);
+    if(result){
+        int n=(edge&BDR_INNER)&&(edge&BDR_OUTER)?2:1;
+        RECT strip;COLORREF c=RGB(68,68,68);
+        if(flags&BF_LEFT){strip=original;strip.right=strip.left+n;paintRect(dc,&strip,c);}
+        if(flags&BF_RIGHT){strip=original;strip.left=strip.right-n;paintRect(dc,&strip,c);}
+        if(flags&BF_TOP){strip=original;strip.bottom=strip.top+n;paintRect(dc,&strip,c);}
+        if(flags&BF_BOTTOM){strip=original;strip.top=strip.bottom-n;paintRect(dc,&strip,c);}
+        if(flags&BF_MIDDLE){strip=original;InflateRect(&strip,-n,-n);paintRect(dc,&strip,RGB(48,48,48));}
+    }
+    RestoreDC(dc,saved);return result;
+}
+static int WINAPI h_frameRect(HDC dc,const RECT*r,HBRUSH brush) {
+    if(!darkMode()||!screenDC(dc))return frameRect(dc,r,brush);
+    LOGBRUSH b;COLORREF color;
+    if((ULONG_PTR)brush<=COLOR_MENUBAR+1)color=GetSysColor((int)(ULONG_PTR)brush-1);
+    else if(GetObjectW(brush,sizeof(b),&b)&&b.lbStyle==BS_SOLID)color=b.lbColor;else return frameRect(dc,r,brush);
+    int hi=GetRValue(color),lo=hi;if(GetGValue(color)>hi)hi=GetGValue(color);if(GetBValue(color)>hi)hi=GetBValue(color);
+    if(GetGValue(color)<lo)lo=GetGValue(color);if(GetBValue(color)<lo)lo=GetBValue(color);
+    if(hi<180||hi-lo>40)return frameRect(dc,r,brush);
+    HBRUSH substitute=CreateSolidBrush(RGB(68,68,68));int result=frameRect(dc,r,substitute);DeleteObject(substitute);return result;
+}
+static BOOL WINAPI h_drawFrame(HDC dc,LPRECT r,UINT type,UINT flags) {
+    if(!darkMode()||!screenDC(dc)||type!=DFC_SCROLL||(flags&0x1f)>3)return drawFrame(dc,r,type,flags);
+    int saved=SaveDC(dc);if(!saved)return drawFrame(dc,r,type,flags);
+    paintRect(dc,r,(flags&DFCS_PUSHED)?RGB(64,64,64):RGB(37,37,37));
+    scrollArrow(dc,r,flags&3,(flags&DFCS_INACTIVE)!=0);RestoreDC(dc,saved);
+    if(flags&DFCS_ADJUSTRECT)InflateRect(r,-GetSystemMetrics(SM_CXEDGE),-GetSystemMetrics(SM_CYEDGE));
+    return TRUE;
+}
+static HTHEME WINAPI h_openTheme(HWND w,LPCWSTR classes){
+    HTHEME h=openTheme(w,classes);
+    /* Match class tokens, not part numbers that other controls also use. */
+    if(classes){const WCHAR *p=classes;while(*p){const WCHAR *e=wcschr(p,L';');size_t n=e?(size_t)(e-p):wcslen(p);
+        if(n==9&&_wcsnicmp(p,L"SCROLLBAR",9)==0){rememberTheme(h);break;}if(!e)break;p=e+1;}}
+    return h;
+}
+static HRESULT WINAPI h_closeTheme(HTHEME h){
+    AcquireSRWLockExclusive(&themeLock);for(int i=0;i<128;i++)if(scrollThemes[i]==h)scrollThemes[i]=NULL;ReleaseSRWLockExclusive(&themeLock);
+    return closeTheme(h);
+}
+static HRESULT WINAPI h_themeBackground(HTHEME h,HDC dc,int part,int s,const RECT*r,const RECT*clip){
+    if(!darkMode()||!screenDC(dc)||!r||!isScrollTheme(h)||part<SBP_ARROWBTN||part>SBP_SIZEBOX)return themeBackground(h,dc,part,s,r,clip);
+    int saved=SaveDC(dc);if(!saved)return themeBackground(h,dc,part,s,r,clip);
+    if(clip)IntersectClipRect(dc,clip->left,clip->top,clip->right,clip->bottom);
+    paintRect(dc,r,RGB(37,37,37));
+    if(part==SBP_THUMBBTNHORZ||part==SBP_THUMBBTNVERT){
+        RECT thumb=*r;InflateRect(&thumb,-2,-2);
+        int v=s==SCRBS_PRESSED?132:s==SCRBS_HOT||s==SCRBS_HOVER?112:s==SCRBS_DISABLED?62:88;
+        HBRUSH brush=CreateSolidBrush(RGB(v,v,v));SelectObject(dc,brush);SelectObject(dc,GetStockObject(NULL_PEN));
+        /* Corner radius <=10 logical px, limited by the narrow thumb dimension. */
+        int diameter=20;if(thumb.right-thumb.left<diameter)diameter=thumb.right-thumb.left;if(thumb.bottom-thumb.top<diameter)diameter=thumb.bottom-thumb.top;
+        if(diameter>0)RoundRect(dc,thumb.left,thumb.top,thumb.right,thumb.bottom,diameter,diameter);
+        RestoreDC(dc,saved);DeleteObject(brush);return S_OK;
+    }
+    if(part==SBP_ARROWBTN){int dir=(s-1)/4,disabled=(s-1)%4==3;if(dir>=0&&dir<=3)scrollArrow(dc,r,dir,disabled);}
+    RestoreDC(dc,saved);return S_OK;
+}
 
 static int gray(int v) {
     if(InterlockedCompareExchange(&enabled,0,0)==2) {
@@ -165,10 +267,20 @@ static DWORD WINAPI worker(void*arg) {
     HMODULE user=GetModuleHandleW(L"user32.dll"),gdi=GetModuleHandleW(L"gdi32.dll");
     hook(user,"FillRect",h_fillRect,(void**)&fillRect);
     hook(gdi,"ExtTextOutW",h_textOut,(void**)&textOut);
+    hook(user,"DrawEdge",h_drawEdge,(void**)&drawEdge);
+    hook(user,"DrawFrameControl",h_drawFrame,(void**)&drawFrame);
+    hook(user,"FrameRect",h_frameRect,(void**)&frameRect);
+    HMODULE ux=LoadLibraryExW(L"uxtheme.dll",NULL,LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if(ux){
+        hook(ux,"OpenThemeData",h_openTheme,(void**)&openTheme);
+        hook(ux,"CloseThemeData",h_closeTheme,(void**)&closeTheme);
+        hook(ux,"DrawThemeBackground",h_themeBackground,(void**)&themeBackground);
+    }
     if(state->error||!rgb||!rgba){state->ready=-1;return 5;}
     /* MinHook enlists/suspends target threads when applying queued hooks. */
     status=MH_QueueEnableHook(MH_ALL_HOOKS);if(status==MH_OK)status=MH_ApplyQueued();
     if(status!=MH_OK){state->error=status;state->ready=-1;return 6;}
+    if(openTheme){HTHEME existing=openTheme(NULL,L"SCROLLBAR");rememberTheme(existing);/* Held until process exit. */}
     state->hooks=installed;state->ready=1;
     for(;;){
         LONG request=InterlockedCompareExchange(&state->request,0,0);

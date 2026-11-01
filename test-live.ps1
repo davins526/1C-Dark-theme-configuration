@@ -5,7 +5,7 @@ $compiler=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Ошибка сборки теста профиля' }
 & "$PSScriptRoot\Dark1C.ProfileTest.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Тест профиля не прошёл' }
-& $compiler /nologo /target:exe /platform:x64 /optimize+ /main:Dark1C.SmokeTest "/resource:$PSScriptRoot\Dark1C.Native.dll,Dark1C.Payload.dll" "/resource:$PSScriptRoot\background.png,Dark1C.Payload.png" /reference:System.Management.dll /out:"$PSScriptRoot\Dark1C.SmokeTest.exe" "$PSScriptRoot\src\Native.cs" "$PSScriptRoot\src\Payload.cs" "$PSScriptRoot\src\SmokeTest.cs"
+& $compiler /nologo /target:exe /platform:x64 /optimize+ /main:Dark1C.SmokeTest "/resource:$PSScriptRoot\Dark1C.Native.dll,Dark1C.Payload.dll" "/resource:$PSScriptRoot\background.png,Dark1C.Payload.png" /reference:System.Management.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /out:"$PSScriptRoot\Dark1C.SmokeTest.exe" "$PSScriptRoot\src\Native.cs" "$PSScriptRoot\src\Payload.cs" "$PSScriptRoot\src\SmokeTest.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Ошибка сборки теста' }
 $testOutput=Join-Path $env:TEMP ('Dark1C-test-'+[Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $testOutput | Out-Null
