@@ -1,0 +1,16 @@
+*.exe
+*.dll
+*.pdb
+*.lib
+*.exp
+*.obj
+*.log
+*.zip
+/background.png
+/assets/
+/theme.ini
+/preview.png
+/.zig-cache/
+/zig-out/
+/.vs/
+/work/
