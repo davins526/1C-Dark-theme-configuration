@@ -40,7 +40,7 @@ namespace Dark1C {
                 if(args.Length==3&&args[0]=="--host") {
                     string dir=args[1];IntPtr cairo=LoadLibraryEx(args[2],IntPtr.Zero,0x1100);if(cairo==IntPtr.Zero)throw new System.ComponentModel.Win32Exception();
                     File.WriteAllText(Path.Combine(dir,"baseline.txt"),Paint(cairo,Path.Combine(dir,"baseline.png")));
-                    for(int stage=1;stage<=3;stage++) {
+                    for(int stage=1;stage<=7;stage++) {
                         int current=stage;Wait(delegate{return File.Exists(Path.Combine(dir,"stage"+current));},"stage");
                         File.WriteAllText(Path.Combine(dir,"result"+stage+".txt"),Paint(cairo,Path.Combine(dir,"stage"+stage+".png")));
                     }
@@ -56,19 +56,22 @@ namespace Dark1C {
                         Wait(delegate{int[] s=Native.State(host.Id,null,null,null);return s!=null&&s[1]!=0;},"native ready");
                         int[] state=Native.State(host.Id,null,null,null);if(state[1]!=1)throw new Exception("Native setup failed: "+state[4]);
                         Console.WriteLine("Hooks: "+state[3]);
-                        for(int stage=1;stage<=3;stage++) {
-                            bool on=stage!=3;Native.State(host.Id,on?1:0,stage==2?1:0,35);
-                            Wait(delegate{return Native.State(host.Id,null,null,null)[2]==(on?1:0);},"switch");
+                        for(int stage=1;stage<=7;stage++) {
+                            bool on=stage!=3&&stage!=7;int theme=stage==4||stage==6?1:0;
+                            Native.State(host.Id,on?1:0,stage==2||stage==6?1:0,35,theme);
+                            Wait(delegate{var s=Native.State(host.Id,null,null,null);return s[2]==(on?1:0)&&s[10]==theme;},"switch");
                             File.WriteAllText(Path.Combine(output,"stage"+stage),"");
                             int current=stage;Wait(delegate{return File.Exists(Path.Combine(output,"result"+current+".txt"));},"paint");
                             string result=File.ReadAllText(Path.Combine(output,"result"+stage+".txt"));Console.WriteLine("Stage "+stage+": "+result);
-                            if(stage==1&&!result.StartsWith("1E1E1E DADADA"))throw new Exception("Theme pixel mismatch");
+                            if((stage==1||stage==5)&&!result.StartsWith("1E1E1E DADADA"))throw new Exception("Theme pixel mismatch");
                             if(stage==2&&(result.Split(' ')[0]=="1E1E1E"))throw new Exception("Wallpaper did not render");
-                            if(stage==3&&result!=baseline)throw new Exception("OFF did not restore original drawing");
+                            if((stage==3||stage==7)&&result!=baseline)throw new Exception("OFF did not restore original drawing");
+                            if(stage==4&&!result.StartsWith("FAFAFA 202020"))throw new Exception("Light palette mismatch");
+                            if(stage==6&&result.Split(' ')[0]=="FAFAFA")throw new Exception("Light wallpaper did not render");
                             if(result.Split(' ')[2]!=baseline.Split(' ')[2])throw new Exception("Accent changed");
                         }
                         if(!host.WaitForExit(5000)||host.ExitCode!=0)throw new Exception("Host exit failed");
-                        Console.WriteLine("PASS: remote injection, Cairo pixels, wallpaper, accents, OFF, clean host exit.");
+                        Console.WriteLine("PASS: injection, dark/light palettes, wallpaper in both themes, accents, repeated switching, OFF, clean exit.");
                     }finally{if(!host.HasExited)host.Kill();}
                 }
                 return 0;

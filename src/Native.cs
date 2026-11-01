@@ -49,18 +49,21 @@ namespace Dark1C {
                 if(!designer)throw new InvalidOperationException("Не удалось подтвердить режим DESIGNER. Открой Конфигуратор отдельно и обнови список.");
             }
         }
-        internal static int[] State(int pid,int? request,int? wallpaper,int? darkness) {
-            IntPtr mapping=OpenFileMapping(6,false,"Local\\Dark1C.State."+pid);
+        internal static int[] State(int pid,int? request,int? wallpaper,int? darkness,int? theme=null) {
+            if(darkness.HasValue&&(darkness.Value<0||darkness.Value>100))throw new ArgumentOutOfRangeException("darkness");
+            if(theme.HasValue&&(theme.Value<0||theme.Value>1))throw new ArgumentOutOfRangeException("theme");
+            IntPtr mapping=OpenFileMapping(6,false,"Local\\Dark1C.State.v2."+pid);
             if(mapping==IntPtr.Zero)return null;
             try {
-                IntPtr view=MapViewOfFile(mapping,6,0,0,(UIntPtr)36);
+                IntPtr view=MapViewOfFile(mapping,6,0,0,(UIntPtr)44);
                 if(view==IntPtr.Zero)throw new Win32Exception();
                 try {
-                    if(Marshal.ReadInt32(view,0)!=0x44314331||Marshal.ReadInt32(view,32)!=1)throw new InvalidOperationException("Несовместимый протокол Dark1C.");
+                    if(Marshal.ReadInt32(view,0)!=0x44314331||Marshal.ReadInt32(view,32)!=2)throw new InvalidOperationException("Несовместимый протокол Dark1C. Перезапусти тестовый Конфигуратор после обновления DLL.");
                     if(wallpaper.HasValue)Marshal.WriteInt32(view,20,wallpaper.Value);
                     if(darkness.HasValue)Marshal.WriteInt32(view,24,darkness.Value);
+                    if(theme.HasValue)Marshal.WriteInt32(view,36,theme.Value);
                     if(request.HasValue)Marshal.WriteInt32(view,28,request.Value);
-                    int[] s=new int[9];Marshal.Copy(view,s,0,9);return s;
+                    int[] s=new int[11];Marshal.Copy(view,s,0,11);return s;
                 }finally {UnmapViewOfFile(view);}
             }finally{CloseHandle(mapping);}
         }
@@ -102,8 +105,9 @@ namespace Dark1C {
                 CloseHandle(process);
             }
         }
-        internal static void Apply(Process p,bool on,bool wallpaper,int darkness) {
+        internal static void Apply(Process p,bool on,bool wallpaper,int darkness,int theme=0) {
             if(on)Inject(p);
+            if(!on&&State(p.Id,null,null,null)==null)return;
             int[] state=null;
             for(int i=0;i<160;i++) {
                 state=State(p.Id,null,null,null);
@@ -112,8 +116,8 @@ namespace Dark1C {
             }
             if(state==null)throw new InvalidOperationException("DLL не ответила. Возможно, её заблокировала защита или отсутствует зависимость.");
             if(state[1]!=1)throw new InvalidOperationException("Перехваты не установлены. Код ошибки: "+state[4]);
-            State(p.Id,on?1:0,wallpaper?1:0,darkness);
-            for(int i=0;i<30;i++) {Thread.Sleep(100);state=State(p.Id,null,null,null);if(state[2]==(on?1:0)){Redraw(p.Id);return;}}
+            State(p.Id,on?1:0,wallpaper?1:0,darkness,theme);
+            for(int i=0;i<30;i++) {Thread.Sleep(100);state=State(p.Id,null,null,null);if(state==null)throw new InvalidOperationException("Процесс завершился во время применения темы.");if(state[2]==(on?1:0)&&state[10]==theme){Redraw(p.Id);return;}}
             throw new TimeoutException("DLL не подтвердила переключение темы.");
         }
         internal static void Redraw(int pid) {

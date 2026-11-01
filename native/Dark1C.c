@@ -7,7 +7,7 @@
 
 /* Own implementation. The DLL remains resident until 1C exits: OFF is a
    transparent pass-through, not an unsafe FreeLibrary of active hook code. */
-typedef struct { volatile LONG magic,ready,enabled,hooks,error,wallpaper,darkness,request,revision; } State;
+typedef struct { volatile LONG magic,ready,enabled,hooks,error,wallpaper,darkness,request,revision,theme,appliedTheme; } State;
 static State *state;
 static HMODULE self;
 static volatile LONG enabled;
@@ -50,7 +50,15 @@ static BOOL (WINAPI *textOut)(HDC,int,int,UINT,const RECT*,LPCWSTR,UINT,const IN
 static int (WINAPI *fillRect)(HDC,const RECT*,HBRUSH);
 
 static int gray(int v) {
-    if(v>=200) return 30+(255-v)*18/55;
+    if(InterlockedCompareExchange(&enabled,0,0)==2) {
+        if(v>=245)return 250;
+        if(v>=225)return 242;
+        if(v>=200)return 230;
+        return 32+v*140/200;
+    }
+    if(v>=245)return 30;
+    if(v>=225)return 37;
+    if(v>=200)return 48;
     if(v<=80) return 218-v/4;
     return 198-(v-80)*150/120;
 }
@@ -60,7 +68,7 @@ static COLORREF remap(COLORREF c) {
     int lo=r<g?r:g; if(b<lo)lo=b;
     if(hi-lo>18&&!(lo>=170&&hi-lo<=70)){
         /* Lift dark syntax colours while retaining their hue. */
-        if((r*2126+g*7152+b*722)/10000<110)
+        if(InterlockedCompareExchange(&enabled,0,0)!=2&&(r*2126+g*7152+b*722)/10000<110)
             return RGB(100+r*155/255,100+g*155/255,100+b*155/255);
         return c;
     }
@@ -98,7 +106,8 @@ static void __cdecl h_fill(cairo_t*c) {
        not a semantic guarantee that the rectangle belongs to the module editor. */
     if(!InterlockedCompareExchange(&enabled,0,0)||!state||!state->wallpaper||!background){fill(c);return;}
     double r,g,b,a,x1,y1,x2,y2;
-    if(getRGBA(getSource(c),&r,&g,&b,&a)!=0||a<.99||fabs(r-g)>.01||fabs(r-b)>.01||r<.10||r>.20){fill(c);return;}
+    if(getRGBA(getSource(c),&r,&g,&b,&a)!=0||a<.99||fabs(r-g)>.01||fabs(r-b)>.01||
+       (InterlockedCompareExchange(&enabled,0,0)==2 ? r<.89 : (r<.10||r>.20))){fill(c);return;}
     Path *p=copyPath(c);
     int rectangular=p&&p->status==0&&p->count==11&&p->data[0].header.type==0&&p->data[2].header.type==1&&p->data[4].header.type==1&&p->data[6].header.type==1&&p->data[8].header.type==3;
     if(p)destroyPath(p);
@@ -113,18 +122,21 @@ static void __cdecl h_fill(cairo_t*c) {
     Matrix m={scale,0,0,scale,-x1*scale,-y1*scale};
     patternMatrix(pat,&m);patternExtend(pat,3);setSource(c,pat);
     int d=state->darkness;if(d<0)d=0;if(d>100)d=100;
-    paintAlpha(c,(100-d)/100.);destroyPattern(pat);restore(c);
+    /* A dark image must not turn the light palette into a dark canvas. */
+    double opacity=(100-d)/100.;
+    if(InterlockedCompareExchange(&enabled,0,0)==2)opacity*=.15;
+    paintAlpha(c,opacity);destroyPattern(pat);restore(c);
 }
 static int hook(HMODULE m,const char*n,void*h,void**original) {
-    void *p=(void*)GetProcAddress(m,n);if(!p)return 0;
+    void *p=(void*)GetProcAddress(m,n);if(!p){state->error=1002;return 0;}
     MH_STATUS s=MH_CreateHook(p,h,original);if(s!=MH_OK){state->error=s;return 0;}installed++;return 1;
 }
 #define RESOLVE(var,name) var=(void*)GetProcAddress(cairo,name)
 static DWORD WINAPI worker(void*arg) {
-    wchar_t name[96];wsprintfW(name,L"Local\\Dark1C.State.%lu",GetCurrentProcessId());
+    wchar_t name[96];wsprintfW(name,L"Local\\Dark1C.State.v2.%lu",GetCurrentProcessId());
     HANDLE mapping=CreateFileMappingW(INVALID_HANDLE_VALUE,NULL,PAGE_READWRITE,0,sizeof(State),name);
     if(!mapping)return 1;state=MapViewOfFile(mapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(State));if(!state)return 2;
-    ZeroMemory(state,sizeof(State));state->magic=0x44314331;state->revision=1;state->darkness=65;
+    ZeroMemory(state,sizeof(State));state->magic=0x44314331;state->revision=2;state->darkness=65;
     MH_STATUS status=MH_Initialize();if(status!=MH_OK){state->error=status;state->ready=-1;return 3;}
     HMODULE cairo=NULL;
     for(int i=0;i<100&&!cairo;i++){cairo=GetModuleHandleW(L"cairo.dll");if(!cairo)cairo=GetModuleHandleW(L"cairo-2.dll");if(!cairo)Sleep(100);}
@@ -142,9 +154,12 @@ static DWORD WINAPI worker(void*arg) {
     RESOLVE(surfacePattern,"cairo_pattern_create_for_surface");RESOLVE(patternMatrix,"cairo_pattern_set_matrix");RESOLVE(patternExtend,"cairo_pattern_set_extend");
     RESOLVE(setSource,"cairo_set_source");RESOLVE(destroyPattern,"cairo_pattern_destroy");RESOLVE(imageWidth,"cairo_image_surface_get_width");RESOLVE(imageHeight,"cairo_image_surface_get_height");
     if(save&&restore&&clipPreserve&&paintAlpha&&getSource&&getRGBA&&extents&&copyPath&&destroyPath&&loadPng&&surfaceStatus&&destroySurface&&surfacePattern&&patternMatrix&&patternExtend&&setSource&&destroyPattern&&imageWidth&&imageHeight){
-        wchar_t path[MAX_PATH];char utf8[2048];GetModuleFileNameW(self,path,MAX_PATH);wchar_t *end=wcsrchr(path,L'\\');if(end)wcscpy(end+1,L"background.png");
-        WideCharToMultiByte(CP_UTF8,0,path,-1,utf8,sizeof(utf8),NULL,NULL);
-        background=loadPng(utf8);if(surfaceStatus(background)){destroySurface(background);background=NULL;}
+        wchar_t path[32768];char utf8[98304];DWORD length=GetModuleFileNameW(self,path,32768);
+        wchar_t *end=length&&length<32768?wcsrchr(path,L'\\'):NULL;
+        if(end&&(end-path)+16<32768){wcscpy(end+1,L"background.png");
+            if(WideCharToMultiByte(CP_UTF8,0,path,-1,utf8,sizeof(utf8),NULL,NULL))background=loadPng(utf8);
+        }
+        if(background&&surfaceStatus(background)){destroySurface(background);background=NULL;}
         if(background)hook(cairo,"cairo_fill",h_fill,(void**)&fill);
     }
     HMODULE user=GetModuleHandleW(L"user32.dll"),gdi=GetModuleHandleW(L"gdi32.dll");
@@ -155,7 +170,12 @@ static DWORD WINAPI worker(void*arg) {
     status=MH_QueueEnableHook(MH_ALL_HOOKS);if(status==MH_OK)status=MH_ApplyQueued();
     if(status!=MH_OK){state->error=status;state->ready=-1;return 6;}
     state->hooks=installed;state->ready=1;
-    for(;;){LONG request=InterlockedCompareExchange(&state->request,0,0);InterlockedExchange(&enabled,request==1);state->enabled=enabled;Sleep(80);}
+    for(;;){
+        LONG request=InterlockedCompareExchange(&state->request,0,0);
+        LONG theme=InterlockedCompareExchange(&state->theme,0,0)==1?1:0;
+        InterlockedExchange(&enabled,request==1?theme+1:0);
+        state->appliedTheme=theme;state->enabled=enabled!=0;Sleep(80);
+    }
 }
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID reserved) {
     if(reason==DLL_PROCESS_ATTACH){self=instance;DisableThreadLibraryCalls(instance);HANDLE t=CreateThread(NULL,0,worker,NULL,0,NULL);if(t)CloseHandle(t);else return FALSE;}

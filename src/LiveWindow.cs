@@ -13,20 +13,25 @@ namespace Dark1C {
             public override string ToString(){return Label;}
         }
         readonly ComboBox targets=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList,Width=690};
+        readonly ComboBox themes=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList,Width=320};
         readonly CheckBox wallpaper=new CheckBox {Text="Картинка на крупных фонах Cairo (экспериментально)",AutoSize=true};
         readonly TrackBar darkness=new TrackBar {Minimum=0,Maximum=100,Value=65,Width=260,TickFrequency=10};
         readonly Label status=new Label {AutoSize=false,Width=740,Height=95,Text="Выбери тестовый Конфигуратор и нажми «Включить»."};
         readonly Label darkLabel=new Label {Text="Затемнение картинки: 65%",AutoSize=true};
         readonly Button enable,disable,refresh;
         readonly string log=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Dark1C","launcher.log");
+        readonly string profilePath=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Dark1C","profile.xml");
+        string profileError;
         bool busy;
         public LiveWindow() {
-            Text="Dark1C · 1С 8.5.1.1529 x64 · тестовая версия";
-            ClientSize=new Size(790,420);MinimumSize=new Size(800,460);
+            Text="Dark1C 0.2 · 1С 8.5.1.1529 x64 · предварительная версия";
+            ClientSize=new Size(790,510);MinimumSize=new Size(800,550);
             StartPosition=FormStartPosition.CenterScreen;BackColor=Color.FromArgb(30,30,30);ForeColor=Color.Gainsboro;Font=new Font("Segoe UI",10);
             var flow=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(20),AutoScroll=true};
             flow.Controls.Add(new Label{Text="Тёмная тема для настоящего Конфигуратора",AutoSize=true,Font=new Font(Font,FontStyle.Bold),Margin=new Padding(0,0,0,12)});
             flow.Controls.Add(targets);
+            flow.Controls.Add(new Label{Text="Оформление",AutoSize=true,Margin=new Padding(0,12,0,4)});
+            themes.Items.AddRange(new object[]{"Графит — тёмная тема","Светлая — мягкие серые оттенки"});themes.SelectedIndex=0;flow.Controls.Add(themes);
             var actions=new FlowLayoutPanel{Width=740,Height=48,Margin=new Padding(0,8,0,8)};
             enable=Button("Включить");disable=Button("Выключить");refresh=Button("Обновить список");var preview=Button("Предпросмотр");
             actions.Controls.AddRange(new Control[]{enable,disable,refresh,preview});flow.Controls.Add(actions);
@@ -35,8 +40,10 @@ namespace Dark1C {
             refresh.Click+=delegate{RefreshTargets();};preview.Click+=delegate{new MainWindow().Show(this);};
             enable.Click+=async delegate{await Apply(true);};disable.Click+=async delegate{await Apply(false);};
             darkness.ValueChanged+=delegate{darkLabel.Text="Затемнение картинки: "+darkness.Value+"%";};
-            FormClosing+=delegate(object sender,FormClosingEventArgs e){if(busy)e.Cancel=true;};
-            Shown+=delegate{RefreshTargets();};
+            try {var p=Profile.Load(profilePath);themes.SelectedIndex=p.Theme;wallpaper.Checked=p.Wallpaper;darkness.Value=p.Darkness;}
+            catch(Exception ex){profileError="Профиль не загружен; использованы исходные настройки. "+ex.Message;WriteLog(profileError);}
+            FormClosing+=delegate(object sender,FormClosingEventArgs e){if(busy){e.Cancel=true;return;}SaveProfile();};
+            Shown+=delegate{RefreshTargets();if(profileError!=null)status.Text=profileError;};
         }
         Button Button(string label){return new Button{Text=label,AutoSize=true,Height=34,FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(48,48,48),ForeColor=ForeColor,Margin=new Padding(0,0,10,0)};}
         void RefreshTargets() {
@@ -47,15 +54,18 @@ namespace Dark1C {
         }
         async Task Apply(bool on) {
             var target=targets.SelectedItem as Target;if(target==null){status.Text="Сначала выбери Конфигуратор.";return;}
-            bool picture=wallpaper.Checked;int dark=darkness.Value;busy=true;enable.Enabled=disable.Enabled=refresh.Enabled=targets.Enabled=false;status.Text="Ожидание ответа нативного модуля…";
+            bool picture=wallpaper.Checked;int dark=darkness.Value;int theme=themes.SelectedIndex;
+            busy=true;enable.Enabled=disable.Enabled=refresh.Enabled=targets.Enabled=themes.Enabled=wallpaper.Enabled=darkness.Enabled=false;status.Text="Ожидание ответа нативного модуля…";
             try {
-                await Task.Run(delegate{using(Process p=Process.GetProcessById(target.Id)){Native.Validate(p);Native.Apply(p,on,picture,dark);}});
+                await Task.Run(delegate{using(Process p=Process.GetProcessById(target.Id)){Native.Validate(p);Native.Apply(p,on,picture,dark,theme);}});
                 int[] s=Native.State(target.Id,null,null,null);
-                status.Text=(on?"Тема включена":"Тема выключена")+" · PID "+target.Id+" · перехватов: "+s[3]+". Если сохранилась старая заливка, переоткрой окно редактора.";
+                status.Text=(on?"Тема включена: "+themes.SelectedItem:"Тема выключена")+" · PID "+target.Id+" · перехватов: "+(s==null?0:s[3])+". Если сохранилась старая заливка, переоткрой окно редактора.";
                 WriteLog(status.Text);
+                SaveProfile();
             }catch(Exception ex){status.Text=ex.Message;WriteLog(ex.ToString());}
-            finally{busy=false;enable.Enabled=disable.Enabled=refresh.Enabled=targets.Enabled=true;}
+            finally{busy=false;enable.Enabled=disable.Enabled=refresh.Enabled=targets.Enabled=themes.Enabled=wallpaper.Enabled=darkness.Enabled=true;}
         }
+        void SaveProfile(){try{new Profile{Theme=themes.SelectedIndex,Wallpaper=wallpaper.Checked,Darkness=darkness.Value}.Save(profilePath);}catch(Exception ex){WriteLog(ex.ToString());status.Text="Настройки не сохранены: "+ex.Message;}}
         void WriteLog(string message){try{Directory.CreateDirectory(Path.GetDirectoryName(log));File.AppendAllText(log,DateTime.Now.ToString("s")+" "+message+Environment.NewLine,Encoding.UTF8);}catch{}}
         [STAThread]static void Main(){Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);Application.Run(new LiveWindow());}
     }
