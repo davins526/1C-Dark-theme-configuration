@@ -24,7 +24,7 @@ namespace Dark1C {
         string profileError;
         bool busy;
         public LiveWindow() {
-            Text="Dark1C 0.2.2 · 1С 8.5.1.1529 x64 · предварительная версия";
+            Text="Dark1C 0.2.3-preview · 1С 8.5.1.1529 x64 · предварительная версия";
             ClientSize=new Size(790,510);MinimumSize=new Size(800,550);
             StartPosition=FormStartPosition.CenterScreen;BackColor=Color.FromArgb(30,30,30);ForeColor=Color.Gainsboro;Font=new Font("Segoe UI",10);
             var flow=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(20),AutoScroll=true};

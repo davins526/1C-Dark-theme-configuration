@@ -23,11 +23,20 @@ function Get-Dark1CExclusionExitCode {
     if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
         throw 'Expected a valid Microsoft-signed Defender command-line tool.'
     }
-    & $tool -CheckExclusion -Path $Path *> $null
+    $diagnostic = @(& $tool -CheckExclusion -Path $Path 2>&1)
     $exitCode = $LASTEXITCODE
     # The documented success value here is 1; do not leak it to the job shell's
     # final native-exit check. The caller validates it and throws on any other value.
     $global:LASTEXITCODE = 0
+    if ($exitCode -ne 1) {
+        # Keep the actual scanner explanation when a hosted preflight fails.
+        # Redact the requested path; no local resource paths go into the report.
+        $message = ($diagnostic | ForEach-Object { [string]$_ }) -join ' '
+        $message = $message.Replace($Path, '<checked-path>')
+        if ($message.Length -gt 2048) { $message = $message.Substring(0, 2048) }
+        $version = (Get-Item -LiteralPath $tool).VersionInfo.FileVersion
+        Write-Host "Defender CheckExclusion exit=$exitCode toolVersion=$version : $message"
+    }
     return $exitCode
 }
 

@@ -8,7 +8,7 @@
 
 Спокойные графитовые оттенки, собственный фон и привычный рабочий процесс 1С.
 
-![Status](https://img.shields.io/badge/status-0.2.2_preview-e8b45e?style=flat-square)
+![Status](https://img.shields.io/badge/status-0.2.3_preview-e8b45e?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows_x64-303030?style=flat-square)
 ![1C](https://img.shields.io/badge/tested-1C_8.5.1.1529-303030?style=flat-square)
 [![License](https://img.shields.io/badge/license-MIT-303030?style=flat-square)](LICENSE.txt)
