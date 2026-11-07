@@ -6,6 +6,7 @@
 #include <uxtheme.h>
 #include <vssym32.h>
 #include "MinHook.h"
+#include "TextContrast.h"
 
 /* Own implementation. The DLL remains resident until 1C exits: OFF is a
    transparent pass-through, not an unsafe FreeLibrary of active hook code. */
@@ -192,9 +193,7 @@ static void __cdecl h_stoprgba(cairo_pattern_t*p,double o,double r,double g,doub
 static BOOL WINAPI h_textOut(HDC dc,int x,int y,UINT opts,const RECT*rc,LPCWSTR text,UINT n,const INT*dx) {
     if(!WindowFromDC(dc)||!InterlockedCompareExchange(&enabled,0,0))return textOut(dc,x,y,opts,rc,text,n,dx);
     COLORREF fg=GetTextColor(dc), bg=GetBkColor(dc);
-    SetTextColor(dc,remap(fg));SetBkColor(dc,remap(bg));
-    BOOL ok=textOut(dc,x,y,opts,rc,text,n,dx);
-    SetTextColor(dc,fg);SetBkColor(dc,bg);return ok;
+    return drawReadableText(textOut,dc,x,y,opts,rc,text,n,dx,remap(fg),remap(bg));
 }
 static int WINAPI h_fillRect(HDC dc,const RECT*rc,HBRUSH brush) {
     if(!InterlockedCompareExchange(&enabled,0,0)||!WindowFromDC(dc)||colorDepth)return fillRect(dc,rc,brush);

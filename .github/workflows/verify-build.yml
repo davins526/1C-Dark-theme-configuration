@@ -11,6 +11,7 @@ on:
       - 'native/**'
       - 'vendor/**'
       - 'build-live.ps1'
+      - 'test-contrast.ps1'
       - 'create-background.ps1'
       - 'docs/BUILD-CANDIDATE.md'
       - 'LICENSE.txt'
