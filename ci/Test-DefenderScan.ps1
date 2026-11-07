@@ -9,7 +9,8 @@ function Get-MpComputerStatus {
     $script:statusCalls++
     [pscustomobject]@{
         AMServiceEnabled = $true; AntivirusEnabled = ($script:scenario -ne 'disabled')
-        RealTimeProtectionEnabled = ($script:scenario -ne 'real-time-off')
+        RealTimeProtectionEnabled = ($script:scenario -ne 'real-time-off' -and
+            -not ($script:scenario -eq 'startup' -and $script:statusCalls -lt 3))
         AMRunningMode = $(if ($script:scenario -eq 'passive') { 'Passive Mode' } else { 'Normal' })
         AntivirusSignatureLastUpdated = $(if ($script:scenario -eq 'stale') { [DateTime]::UtcNow.AddDays(-5) } else { [DateTime]::UtcNow })
         AMEngineVersion = 'mock'; AntivirusSignatureVersion = 'mock'
@@ -44,6 +45,15 @@ $null = New-Item -ItemType Directory -Path $testDir
 $script:fixture = Join-Path $testDir 'harmless-text.txt'
 $script:sourceFixture = Join-Path $testDir 'original-text.txt'
 try {
+    $script:scenario='startup'; $script:statusCalls=0
+    $null = Wait-Dark1CDefenderReady -Attempts 3 -DelaySeconds 0
+    if ($script:statusCalls -ne 3) { throw 'Readiness did not wait for active protection.' }
+    Write-Output 'PASS readiness-startup'
+    $script:scenario='real-time-off'; $script:statusCalls=0
+    $refused=$false
+    try { $null = Wait-Dark1CDefenderReady -Attempts 3 -DelaySeconds 0 } catch { $refused=$true }
+    if (-not $refused -or $script:statusCalls -ne 3) { throw 'Persistent disabled protection was not rejected within the retry bound.' }
+    Write-Output 'PASS readiness-timeout'
     foreach ($case in @('clean','disabled','real-time-off','passive','stale','excluded','exclusion-error','scan-error','history-error','detected','source-detected','changed','quarantined','missing')) {
         $script:scenario = $case; $script:scans = 0; $script:statusCalls = 0
         [IO.File]::WriteAllText($script:fixture, 'Ordinary test text. Not executable code.')

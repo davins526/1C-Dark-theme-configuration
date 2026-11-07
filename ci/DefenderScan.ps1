@@ -13,6 +13,20 @@ function Assert-Dark1CDefenderReady {
     return $state
 }
 
+function Wait-Dark1CDefenderReady {
+    param([ValidateRange(1,13)][int]$Attempts = 13, [ValidateRange(0,5)][int]$DelaySeconds = 5)
+    # Starting protection and updating its platform can return before the active
+    # state is observable. Never proceed unless the existing readiness check passes.
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try { return (Assert-Dark1CDefenderReady) }
+        catch {
+            if ($attempt -eq $Attempts) { throw }
+            Write-Host "Waiting for active Defender protection ($attempt/$Attempts)."
+            if ($DelaySeconds -gt 0) { Start-Sleep -Seconds $DelaySeconds }
+        }
+    }
+}
+
 function Get-Dark1CExclusionExitCode {
     param([string]$Path)
     $platform = Join-Path $env:ProgramData 'Microsoft\Windows Defender\Platform'

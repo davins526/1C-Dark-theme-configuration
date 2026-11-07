@@ -33,9 +33,13 @@ try {
         }
     }
     $buildReport.stage = 'defender-readiness'
+    # Signature/platform startup can restart Defender after the initial setting.
+    Set-MpPreference -DisableRealtimeMonitoring $false -DisableBehaviorMonitoring $false -ErrorAction Stop
     $buildReport.defenderAfter = Get-MpComputerStatus -ErrorAction Stop |
         Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, AMRunningMode
-    $null = Assert-Dark1CDefenderReady
+    Write-Host ('Defender after update: ' + ($buildReport.defenderAfter | ConvertTo-Json -Compress))
+    $buildReport.defenderAfter = Wait-Dark1CDefenderReady |
+        Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, AMRunningMode
     $buildReport.stage = 'remove-hosted-exclusions'
     Write-Host 'Removing preconfigured scan exclusions on this disposable hosted worker only.'
     $preferences = Get-MpPreference -ErrorAction Stop
