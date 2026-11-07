@@ -63,7 +63,7 @@ try {
     # still require CheckExclusion=1 for the directory and every artifact.
     $scanRoot = Join-Path ($env:SystemDrive + '\') ('Dark1C-Verification-' + [Guid]::NewGuid().ToString('N'))
     $null = New-Item -ItemType Directory -Path $scanRoot
-    $buildReport.scanDirectoryExclusionExitCode = Get-Dark1CExclusionExitCode -Path $scanRoot
+    $buildReport.scanDirectoryExclusionExitCode = Wait-Dark1CExclusionRemoval -Path $scanRoot
     if ($buildReport.scanDirectoryExclusionExitCode -ne 1) {
         throw "Scan directory exclusion check failed: exit $($buildReport.scanDirectoryExclusionExitCode)."
     }

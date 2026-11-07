@@ -4,6 +4,7 @@ $ErrorActionPreference = 'Stop'
 $script:scenario = ''
 $script:scans = 0
 $script:statusCalls = 0
+$script:exclusionCalls = 0
 function Get-MpComputerStatus {
     param($ErrorAction)
     $script:statusCalls++
@@ -25,6 +26,8 @@ function Start-MpScan {
 }
 function Get-Dark1CExclusionExitCode {
     param($Path)
+    $script:exclusionCalls++
+    if ($script:scenario -eq 'exclusion-propagation' -and $script:exclusionCalls -lt 3) { return 0 }
     if ($script:scenario -eq 'excluded') { return 0 }
     if ($script:scenario -eq 'exclusion-error') { return -1 }
     return 1
@@ -54,6 +57,17 @@ try {
     try { $null = Wait-Dark1CDefenderReady -Attempts 3 -DelaySeconds 0 } catch { $refused=$true }
     if (-not $refused -or $script:statusCalls -ne 3) { throw 'Persistent disabled protection was not rejected within the retry bound.' }
     Write-Output 'PASS readiness-timeout'
+    $script:scenario='exclusion-propagation'; $script:exclusionCalls=0
+    if ((Wait-Dark1CExclusionRemoval -Path $script:fixture -Attempts 3 -DelaySeconds 0) -ne 1 -or $script:exclusionCalls -ne 3) { throw 'Exclusion removal was not confirmed.' }
+    Write-Output 'PASS exclusion-propagation'
+    foreach ($case in @('excluded','exclusion-error')) {
+        $script:scenario=$case; $script:exclusionCalls=0; $reason=$null
+        try { $null=Wait-Dark1CExclusionRemoval -Path $script:fixture -Attempts 3 -DelaySeconds 0 } catch { $reason=$_.Exception.Message }
+        $expectedReason=if($case -eq 'excluded'){'artifact-excluded'}else{'exclusion-tool-error'}
+        $expectedCalls=if($case -eq 'excluded'){3}else{1}
+        if($reason -ne $expectedReason -or $script:exclusionCalls -ne $expectedCalls){throw "Invalid exclusion wait result: $case"}
+        Write-Output "PASS wait-$case"
+    }
     foreach ($case in @('clean','disabled','real-time-off','passive','stale','excluded','exclusion-error','scan-error','history-error','detected','source-detected','changed','quarantined','missing')) {
         $script:scenario = $case; $script:scans = 0; $script:statusCalls = 0
         [IO.File]::WriteAllText($script:fixture, 'Ordinary test text. Not executable code.')

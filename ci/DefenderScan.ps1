@@ -62,6 +62,18 @@ function Assert-Dark1CPathScanned {
     if ($exitCode -ne 1) { throw 'exclusion-tool-error' }
 }
 
+function Wait-Dark1CExclusionRemoval {
+    param([string]$Path, [ValidateRange(1,13)][int]$Attempts = 13, [ValidateRange(0,5)][int]$DelaySeconds = 5)
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $exitCode = Get-Dark1CExclusionExitCode -Path $Path
+        if ($exitCode -eq 1) { return 1 }
+        if ($exitCode -ne 0) { throw 'exclusion-tool-error' }
+        if ($attempt -eq $Attempts) { throw 'artifact-excluded' }
+        Write-Host "Waiting for removed hosted exclusions to take effect ($attempt/$Attempts)."
+        if ($DelaySeconds -gt 0) { Start-Sleep -Seconds $DelaySeconds }
+    }
+}
+
 function Invoke-Dark1CDefenderScan {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string[]]$ArtifactPaths, [string[]]$AdditionalDetectionPaths = @())
