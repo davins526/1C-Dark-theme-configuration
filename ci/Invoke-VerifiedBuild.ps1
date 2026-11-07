@@ -1,5 +1,5 @@
 # Run only on a fresh GitHub-hosted Windows worker. Never executes the application
-# or hook DLL. The standalone text-contrast test contains neither injection nor hooks.
+# or hook DLL. Standalone drawing tests contain neither injection nor hooks.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
@@ -9,7 +9,7 @@ $root = Split-Path $PSScriptRoot -Parent
 $reports = Join-Path $PSScriptRoot 'reports'
 $null = New-Item -ItemType Directory -Force -Path $reports
 . (Join-Path $PSScriptRoot 'DefenderScan.ps1')
-$buildReport = [ordered]@{ schema = 1; commit = $env:GITHUB_SHA; result = 'unverified'; stage = 'defender-preflight'; zigArchiveSha256 = $null; textContrastTest = 'not-run'; defenderBefore = $null; defenderAfter = $null; removedExclusionCounts = $null; scanDirectoryExclusionExitCode = $null }
+$buildReport = [ordered]@{ schema = 1; commit = $env:GITHUB_SHA; result = 'unverified'; stage = 'defender-preflight'; zigArchiveSha256 = $null; textContrastTest = 'not-run'; edgeDrawingTest = 'not-run'; defenderBefore = $null; defenderAfter = $null; removedExclusionCounts = $null; scanDirectoryExclusionExitCode = $null }
 try {
     Write-Host 'Preparing Defender protection on the disposable hosted worker.'
     # Strengthen protection only on the disposable GitHub-hosted worker.
@@ -54,7 +54,10 @@ try {
     }
     $buildReport.stage = 'scan-location'
     Write-Host 'Checking a dedicated scan directory outside the checkout before building.'
-    $scanRoot = Join-Path $env:WINDIR ('Temp\Dark1C-Verification-' + [Guid]::NewGuid().ToString('N'))
+    # Windows Temp was excluded on hosted run 42369358854 despite empty custom
+    # exclusion lists. Use a fresh directory outside Windows and the checkout;
+    # still require CheckExclusion=1 for the directory and every artifact.
+    $scanRoot = Join-Path ($env:SystemDrive + '\') ('Dark1C-Verification-' + [Guid]::NewGuid().ToString('N'))
     $null = New-Item -ItemType Directory -Path $scanRoot
     $buildReport.scanDirectoryExclusionExitCode = Get-Dark1CExclusionExitCode -Path $scanRoot
     if ($buildReport.scanDirectoryExclusionExitCode -ne 1) {
@@ -84,6 +87,9 @@ try {
     $buildReport.stage = 'text-contrast-test'
     & (Join-Path $root 'test-contrast.ps1') -Zig $zig
     $buildReport.textContrastTest = 'passed'
+    $buildReport.stage = 'edge-drawing-test'
+    & (Join-Path $root 'test-edges.ps1') -Zig $zig
+    $buildReport.edgeDrawingTest = 'passed'
     $buildReport.stage = 'build'
     Write-Host 'Compiling Dark1C without executing the produced code.'
     # Checkout contains no user wallpaper. create-background.ps1 makes the neutral fallback.

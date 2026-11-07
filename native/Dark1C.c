@@ -7,6 +7,7 @@
 #include <vssym32.h>
 #include "MinHook.h"
 #include "TextContrast.h"
+#include "EdgeDrawing.h"
 
 /* Own implementation. The DLL remains resident until 1C exits: OFF is a
    transparent pass-through, not an unsafe FreeLibrary of active hook code. */
@@ -88,22 +89,7 @@ static void scrollArrow(HDC dc,const RECT*r,int direction,int disabled) {
     RestoreDC(dc,saved);DeleteObject(pen);
 }
 static BOOL WINAPI h_drawEdge(HDC dc,LPRECT r,UINT edge,UINT flags) {
-    if(!darkMode()||!screenDC(dc)||!r||flags&BF_DIAGONAL)return drawEdge(dc,r,edge,flags);
-    RECT original=*r;
-    /* Preserve Win32 rectangle adjustment/return semantics, then cover only the
-       requested edge strips. Backgrounds and hit rectangles are unchanged. */
-    int saved=SaveDC(dc);if(!saved)return drawEdge(dc,r,edge,flags);
-    BOOL result=drawEdge(dc,r,edge,flags);
-    if(result){
-        int n=(edge&BDR_INNER)&&(edge&BDR_OUTER)?2:1;
-        RECT strip;COLORREF c=RGB(68,68,68);
-        if(flags&BF_LEFT){strip=original;strip.right=strip.left+n;paintRect(dc,&strip,c);}
-        if(flags&BF_RIGHT){strip=original;strip.left=strip.right-n;paintRect(dc,&strip,c);}
-        if(flags&BF_TOP){strip=original;strip.bottom=strip.top+n;paintRect(dc,&strip,c);}
-        if(flags&BF_BOTTOM){strip=original;strip.top=strip.bottom-n;paintRect(dc,&strip,c);}
-        if(flags&BF_MIDDLE){strip=original;InflateRect(&strip,-n,-n);paintRect(dc,&strip,RGB(48,48,48));}
-    }
-    RestoreDC(dc,saved);return result;
+    return drawThemedEdge(drawEdge,fillRect,dc,r,edge,flags,darkMode()&&screenDC(dc));
 }
 static int WINAPI h_frameRect(HDC dc,const RECT*r,HBRUSH brush) {
     if(!darkMode()||!screenDC(dc))return frameRect(dc,r,brush);
